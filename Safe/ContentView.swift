@@ -6,80 +6,229 @@
 //
 
 import SwiftUI
-import CoreData
 
 struct ContentView: View {
-    @Environment(\.managedObjectContext) private var viewContext
+    @State var balance: Double = 0
 
-    @FetchRequest(
-        sortDescriptors: [NSSortDescriptor(keyPath: \Item.timestamp, ascending: true)],
-        animation: .default)
-    private var items: FetchedResults<Item>
+    @StateObject var trModel = TransactionsModel()
+    @StateObject var expenseCatModel = ExpenseCategoriesModel()
+    @StateObject var incomeCatModel = IncomeCategoriesModel()
 
+    @State var isAddingTransaction = false
+    @State var isDeductTransaction = false
+    @State var newTransactionAmount = ""
+
+    var totalBalance: Double {
+        balance + trModel.transactions.reduce(0) { $0 + $1.amount }
+    }
+    
+    @State var isTransactionList: Bool = false
+    
+    let columns = [
+            GridItem(.flexible()),
+            GridItem(.flexible()),
+            GridItem(.flexible()),
+            GridItem(.flexible())
+        ]
+    
     var body: some View {
         NavigationView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp!, formatter: itemFormatter)")
-                    } label: {
-                        Text(item.timestamp!, formatter: itemFormatter)
+            ZStack {
+                Rectangle()
+                    .fill(LinearGradient(
+                        gradient: Gradient(colors: [
+//                                Color(hex: "#2a5298"),
+                                Color(hex: "##1e3c72"),
+//                                Color(hex: "#537895"),
+                                Color(hex: "#09203f")
+                            ]),
+                            startPoint: .top,
+                            endPoint: .bottom
+                    ))
+                    .ignoresSafeArea()
+                
+                VStack(spacing: 40) {
+                    Spacer()
+                    
+                    VStack {
+                        Text("\(totalBalance, specifier: "%.2f")")
+                            .font(.largeTitle)
+                        Text("balance")
                     }
-                }
-                .onDelete(perform: deleteItems)
-            }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
+                    
+                    Button(action: {
+                        isTransactionList.toggle()
+                    }, label: {
+                        Text("Transactions list")
+                    })
+                    .sheet(isPresented: $isTransactionList, content: {
+                        TransactionsList(trModel: trModel)
+                    })
+                    
+                    Spacer()
+                    
+                    HStack {
+                        
+                        Spacer()
+                        
+                        ZStack {
+                            Circle()
+                                .fill(Material.ultraThinMaterial)
+                                .frame(width: 100, height: 100)
+                            Button(action: {
+                                isDeductTransaction = true
+                            }, label: {
+                                Image(systemName: "minus")
+                            })
+                            .font(.largeTitle)
+                            .foregroundColor(.white)
+                            .frame(width: 100, height: 100)
+                            .clipShape(Circle())
+                        }
+                        .overlay(Circle().stroke(Material.thin, lineWidth: 4))
+                        .frame(width: 100, height: 100)
+                        
+                        Spacer()
+                        
+                        ZStack {
+                            Circle()
+                                .fill(Material.ultraThinMaterial)
+                                .frame(width: 100, height: 100)
+                            Button(action: {
+                                isAddingTransaction = true
+                            }, label: {
+                                Image(systemName: "plus")
+                            })
+                            .font(.largeTitle)
+                            .foregroundColor(.white)
+                            .frame(width: 100, height: 100)
+                            .clipShape(Circle())
+                        }
+                        .overlay(Circle().stroke(Material.thin, lineWidth: 4))
+                        .frame(width: 100, height: 100)
+                        
+                        Spacer()
                     }
+                    .frame(maxWidth: .infinity)
+                }
+                .navigationTitle("Safe")
+                .sheet(isPresented: $isAddingTransaction) {
+                        VStack(spacing: 20) {
+                            Text("Введите сумму")
+                                .font(.headline)
+                            
+                            TextField("Сумма", text: $newTransactionAmount)
+                                .keyboardType(.decimalPad)
+                                .padding()
+                                .background(Color(.systemGray6))
+                                .cornerRadius(8)
+                                .padding(.horizontal)
+                            
+                            Button("Добавить") {
+                                addBalance()
+                            }
+                            .padding()
+                            .disabled(newTransactionAmount.isEmpty)
+                            
+                            ScrollView {
+                                        LazyVGrid(columns: columns, spacing: 20) {
+                                            ForEach(incomeCatModel.categories, id: \.self) { category in
+                                                VStack(spacing: 10) {
+                                                    Image(systemName: category.categoryImage)
+                                                    Text(category.categoryTitle)
+                                                }
+                                            }
+                                        }
+                                        .padding()
+                                    }
+                        }
+                        .padding(.top, 40)
+                }
+                .sheet(isPresented: $isDeductTransaction) {
+                        VStack(spacing: 20) {
+                            Text("Введите сумму")
+                                .font(.headline)
+                            
+                            TextField("Сумма", text: $newTransactionAmount)
+                                .keyboardType(.decimalPad)
+                                .padding()
+                                .background(Color(.systemGray6))
+                                .cornerRadius(8)
+                                .padding(.horizontal)
+                            
+                            Button("Добавить") {
+                                deductBalance()
+                            }
+                            .padding()
+                            .disabled(newTransactionAmount.isEmpty)
+                            
+                            ScrollView {
+                                        LazyVGrid(columns: columns, spacing: 20) {
+                                            ForEach(expenseCatModel.categories, id: \.self) { category in
+                                                VStack(spacing: 10) {
+                                                    Image(systemName: category.categoryImage)
+                                                    Text(category.categoryTitle)
+                                                }
+                                            }
+                                        }
+                                        .padding()
+                                    }
+                        }
+                        .padding(.top, 40)
                 }
             }
-            Text("Select an item")
         }
     }
-
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(context: viewContext)
-            newItem.timestamp = Date()
-
-            do {
-                try viewContext.save()
-            } catch {
-                // Replace this implementation with code to handle the error appropriately.
-                // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-                let nsError = error as NSError
-                fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
-            }
+    func addBalance() {
+        // Заменяем запятую на точку
+        let formattedAmount = newTransactionAmount.replacingOccurrences(of: ",", with: ".")
+        
+        if let amount = Double(formattedAmount) {
+            let transaction = Transaction(amount: amount)
+            trModel.transactions.append(transaction)
+            newTransactionAmount = ""
+            isAddingTransaction = false
+        } else {
+            print("Некорректный ввод")
         }
     }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            offsets.map { items[$0] }.forEach(viewContext.delete)
-
-            do {
-                try viewContext.save()
-            } catch {
-                // Replace this implementation with code to handle the error appropriately.
-                // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-                let nsError = error as NSError
-                fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
-            }
+    
+    func deductBalance() {
+        // Заменяем запятую на точку
+        let formattedAmount = newTransactionAmount.replacingOccurrences(of: ",", with: ".")
+        
+        if let amount = Double(formattedAmount) {
+            let transaction = Transaction(amount: -amount)
+            trModel.transactions.append(transaction)
+            newTransactionAmount = ""
+            isDeductTransaction = false
+        } else {
+            print("Некорректный ввод")
         }
     }
 }
 
-private let itemFormatter: DateFormatter = {
-    let formatter = DateFormatter()
-    formatter.dateStyle = .short
-    formatter.timeStyle = .medium
-    return formatter
-}()
+extension Color {
+    init(hex: String) {
+        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&int)
+        let r, g, b: UInt64
+        switch hex.count {
+        case 6: // RGB (например, #00FF00)
+            (r, g, b) = ((int >> 16) & 0xFF, (int >> 8) & 0xFF, int & 0xFF)
+        default:
+            (r, g, b) = (0, 0, 0)
+        }
+        self.init(
+            .sRGB,
+            red: Double(r) / 255,
+            green: Double(g) / 255,
+            blue:  Double(b) / 255,
+            opacity: 1
+        )
+    }
+}
 
 #Preview {
     ContentView().environment(\.managedObjectContext, PersistenceController.preview.container.viewContext)
